@@ -1,0 +1,126 @@
+# ====================================================================
+#  Test services — simulate OpenAI-like HTTP services on port 3000
+#  for validating the monitor.
+# ====================================================================
+#
+#  Usage:
+#    docker network create test-net
+#    docker compose -f docker-compose.test.yml up -d
+#    NETWORK_NAME=test-net docker compose up -d
+#    open http://localhost:8080
+#
+# ====================================================================
+
+services:
+  # ---- svc-a: stable, always healthy --------------------------------
+  svc-a:
+    image: node:22-alpine
+    container_name: svc-a
+    command: >
+      node -e "
+        const http = require('http');
+        http.createServer((req, res) => {
+          const url = new URL(req.url, 'http://localhost');
+          if (url.pathname === '/v1/models') {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ data: [{ id: 'gpt-4' }], active_connections: 2 }));
+          } else {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ status: 'healthy', active_connections: 2 }));
+          }
+        }).listen(3000);
+      "
+    networks:
+      - test-net
+
+  # ---- svc-b: stable, slower response (~150ms) ----------------------
+  svc-b:
+    image: node:22-alpine
+    container_name: svc-b
+    command: >
+      node -e "
+        const http = require('http');
+        http.createServer((req, res) => {
+          setTimeout(() => {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ data: [{ id: 'claude-3' }], active_connections: 1 }));
+          }, 150);
+        }).listen(3000);
+      "
+    networks:
+      - test-net
+
+  # ---- svc-c: SSE streaming capable ---------------------------------
+  svc-c:
+    image: node:22-alpine
+    container_name: svc-c
+    command: >
+      node -e "
+        const http = require('http');
+        http.createServer((req, res) => {
+          const url = new URL(req.url, 'http://localhost');
+          if (url.pathname === '/v1/chat/completions' && url.searchParams.get('stream') === 'true') {
+            res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+            let i = 0;
+            const iv = setInterval(() => {
+              if (i++ >= 5) { clearInterval(iv); res.end('data: [DONE]\\n\\n'); return; }
+              res.write('data: ' + JSON.stringify({choices:[{delta:{content:'chunk'+i}}]}) + '\\n\\n');
+            }, 200);
+            return;
+          }
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ data: [{ id: 'gpt-4-turbo' }], active_connections: 5 }));
+        }).listen(3000);
+      "
+    networks:
+      - test-net
+
+  # ---- svc-d: flaky — cycles online/offline every 15s ---------------
+  svc-d:
+    image: alpine:3.20
+    container_name: svc-d
+    command: >
+      sh -c '
+        online=1;
+        while true; do
+          online=$((1 - online));
+          sleep 15;
+        done &
+        echo '{"data":[{"id":"gpt-3.5"}]}' > /tmp/resp.json;
+        while true; do
+          if [ "$online" = "1" ]; then
+            { echo -e "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n";
+              cat /tmp/resp.json; } | nc -l -p 3000 -q 1 2>/dev/null;
+          else
+            { echo -e "HTTP/1.1 503 Service Unavailable\r\n\r\n";
+              echo "offline"; } | nc -l -p 3000 -q 1 2>/dev/null;
+          fi
+        done
+      '
+    networks:
+      - test-net
+
+  # ---- svc-e: always healthy, no models -----------------------------
+  svc-e:
+    image: node:22-alpine
+    container_name: svc-e
+    command: >
+      node -e "
+        const http = require('http');
+        http.createServer((req, res) => {
+          if (req.url === '/v1/models') {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ data: [] }));
+          } else {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ status: 'healthy' }));
+          }
+        }).listen(3000);
+      "
+    networks:
+      - test-net
+
+networks:
+  test-net:
+    external: true
+    name: test-net

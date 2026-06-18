@@ -1,0 +1,45 @@
+# ====================================================================
+#  Docker Service Monitor — docker-compose
+# ====================================================================
+#
+#  Usage:
+#    docker network create my-shared-net
+#    NETWORK_NAME=my-shared-net docker compose up -d
+#
+#  Auto-detects the network when MONITOR_NETWORK is empty.
+# ====================================================================
+
+services:
+  monitor:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        HTTP_PROXY: ""
+        HTTPS_PROXY: ""
+        http_proxy: ""
+        https_proxy: ""
+    container_name: svc-monitor
+    restart: unless-stopped
+
+    ports:
+      - "${HOST_PORT:-8080}:8080"
+
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+
+    environment:
+      MONITOR_PORT:          "8080"
+      MONITOR_TARGET_PORT:   "3000"
+      MONITOR_INTERVAL:      "5000"
+      MONITOR_TIMEOUT:       "3000"
+      DISCOVERY_INTERVAL:    "15000"
+      MONITOR_NETWORK:       "${NETWORK_NAME:-}"
+
+    networks:
+      - monitored-net
+
+networks:
+  monitored-net:
+    external: true
+    name: ${NETWORK_NAME:-monitored-net}
