@@ -51,6 +51,8 @@ type ServiceState struct {
 	ActiveConns    int     `json:"activeConns"`
 	ReportedConns  *int    `json:"reportedConns"`
 	SSECapable     bool    `json:"sseCapable"`
+	CPUPercent     float64 `json:"cpuPercent"`
+	MemoryUsage    string  `json:"memoryUsage"`
 
 	FirstSeen          int64  `json:"firstSeen"`
 	LastOnline         *int64 `json:"lastOnline"`
@@ -89,6 +91,7 @@ func NewServiceState(c ContainerInfo) *ServiceState {
 		IPv4:   c.IPv4,
 		Image:  c.Image,
 
+		CPUPercent:   -1, // sentinel: not yet fetched
 		firstSeen:    now,
 		sinceRecover: now,
 		historySize:  defaultHistorySize,
@@ -193,6 +196,24 @@ func (s *ServiceState) SetSSECapable(v bool) {
 	s.SSECapable = v
 }
 
+// RecordStats updates container resource metrics.
+func (s *ServiceState) RecordStats(cpuPercent float64, memUsage uint64, memLimit uint64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.CPUPercent = math.Round(cpuPercent*10) / 10 // one decimal
+
+	usedMB := float64(memUsage) / 1024 / 1024
+	// Ignore limit when it's the whole Docker host / VM (≥ 8 GB is not a per-container limit).
+	if memLimit > 0 && memLimit < 8*1024*1024*1024 {
+		limitMB := float64(memLimit) / 1024 / 1024
+		pct := float64(memUsage) / float64(memLimit) * 100
+		s.MemoryUsage = fmt.Sprintf("%.0f / %.0f MB (%.0f%%)", usedMB, limitMB, pct)
+	} else if memUsage > 0 {
+		s.MemoryUsage = fmt.Sprintf("%.0f MB", usedMB)
+	}
+}
+
 // Snapshot returns a JSON-safe copy of the state.
 func (s *ServiceState) Snapshot() ServiceState {
 	s.mu.RLock()
@@ -211,6 +232,8 @@ func (s *ServiceState) Snapshot() ServiceState {
 		ActiveConns:        s.ActiveConns,
 		ReportedConns:      s.ReportedConns,
 		SSECapable:         s.SSECapable,
+		CPUPercent:         s.CPUPercent,
+		MemoryUsage:        s.MemoryUsage,
 		FirstSeen:          s.FirstSeen,
 		LastOnline:         s.LastOnline,
 		LastChecked:        s.LastChecked,

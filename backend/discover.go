@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"strings"
@@ -255,6 +257,59 @@ func (d *Discoverer) resolveNetwork(ctx context.Context) error {
 	d.myNetworkID = net.ID
 	log.Printf("[discover] watching network %q (%s)", preferred, net.ID[:12])
 	return nil
+}
+
+// ---------------------------------------------------------------------------
+//  Container stats
+// ---------------------------------------------------------------------------
+
+type rawStats struct {
+	CPUStats struct {
+		CPUUsage struct {
+			TotalUsage uint64 `json:"total_usage"`
+		} `json:"cpu_usage"`
+		SystemCPUUsage uint64 `json:"system_cpu_usage"`
+		OnlineCPUs     uint32 `json:"online_cpus"`
+	} `json:"cpu_stats"`
+	PreCPUStats struct {
+		CPUUsage struct {
+			TotalUsage uint64 `json:"total_usage"`
+		} `json:"cpu_usage"`
+		SystemCPUUsage uint64 `json:"system_cpu_usage"`
+	} `json:"precpu_stats"`
+	MemoryStats struct {
+		Usage uint64 `json:"usage"`
+		Limit uint64 `json:"limit"`
+	} `json:"memory_stats"`
+}
+
+// FetchStats retrieves a one-shot CPU/memory snapshot for a container.
+func (d *Discoverer) FetchStats(ctx context.Context, containerID string) (cpuPct float64, memUsage uint64, memLimit uint64, err error) {
+	if d.cli == nil {
+		return 0, 0, 0, fmt.Errorf("docker client not initialized")
+	}
+
+	resp, err := d.cli.ContainerStats(ctx, containerID, false)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	defer resp.Body.Close()
+
+	limited := io.LimitReader(resp.Body, 65536)
+
+	var s rawStats
+	if err := json.NewDecoder(limited).Decode(&s); err != nil {
+		return 0, 0, 0, err
+	}
+
+	// CPU % = (cpuDelta / systemDelta) × onlineCPUs × 100
+	cpuDelta := float64(s.CPUStats.CPUUsage.TotalUsage) - float64(s.PreCPUStats.CPUUsage.TotalUsage)
+	systemDelta := float64(s.CPUStats.SystemCPUUsage) - float64(s.PreCPUStats.SystemCPUUsage)
+	if systemDelta > 0 && cpuDelta > 0 {
+		cpuPct = (cpuDelta / systemDelta) * float64(s.CPUStats.OnlineCPUs) * 100
+	}
+
+	return cpuPct, s.MemoryStats.Usage, s.MemoryStats.Limit, nil
 }
 
 // ---------------------------------------------------------------------------

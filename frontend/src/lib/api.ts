@@ -16,6 +16,8 @@ export interface ServiceSnapshot {
   activeConns: number;
   reportedConns: number | null;
   sseCapable: boolean;
+  cpuPercent: number;
+  memoryUsage: string;
   firstSeen: number;
   lastOnline: number | null;
   lastChecked: number;

@@ -143,6 +143,13 @@ func (m *Monitor) probeOne(c ContainerInfo) {
 			svc.SetSSECapable(sseOK)
 		}
 	}
+
+	// Fetch container resource stats (CPU / memory)
+	statsCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if cpuPct, memUsage, memLimit, err := m.discoverer.FetchStats(statsCtx, c.ID); err == nil {
+		svc.RecordStats(cpuPct, memUsage, memLimit)
+	}
 }
 
 // SetBroker updates the SSE broker reference (used during init).

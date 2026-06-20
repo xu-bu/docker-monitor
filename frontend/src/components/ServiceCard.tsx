@@ -29,7 +29,7 @@ export default function ServiceCard({ service }: ServiceCardProps) {
       </div>
 
       {/* Metrics grid */}
-      <div className="grid grid-cols-2 gap-x-4 gap-y-2 mb-2.5">
+      <div className="grid grid-cols-3 gap-x-3 gap-y-2 mb-2.5">
         <Metric label="Response" value={fmtMs(service.responseTime)} className="text-blue-400" />
         <Metric label="Conns" value={String(service.activeConns)} className="text-purple-400" />
         <Metric
@@ -41,6 +41,16 @@ export default function ServiceCard({ service }: ServiceCardProps) {
           label="Error Rate"
           value={fmtPct(service.errorRate)}
           className={service.errorRate > 0.3 ? 'text-red-400' : 'text-slate-400'}
+        />
+        <Metric
+          label="CPU"
+          value={service.cpuPercent >= 0 ? `${service.cpuPercent}%` : '—'}
+          className="text-cyan-400"
+        />
+        <Metric
+          label="Memory"
+          value={service.memoryUsage || '—'}
+          className="text-emerald-400"
         />
       </div>
 
